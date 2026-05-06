@@ -134,7 +134,7 @@ class WebHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'text/plain; charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        self.wfile.write(b'OK - stock_bot_share')
+        self.wfile.write(b'OK - stock-bot')
 
     # ─────────── POST ───────────
     def do_POST(self):
