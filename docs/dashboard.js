@@ -1,0 +1,922 @@
+const STATE = { today:null, stats:null, history:null, topflow:null, config:null };
+const API_KEY = 'stockbot_api_url';
+
+function fmt(n, digits=2){
+  if(n===null || n===undefined || n==='') return '-';
+  const v = Number(n);
+  if(isNaN(v)) return '-';
+  return v.toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits});
+}
+function fmtInt(n){
+  if(n===null || n===undefined || n==='') return '-';
+  const v = Number(n);
+  if(isNaN(v)) return '-';
+  return v.toLocaleString('en-US');
+}
+function fmtPct(n, sign=true){
+  if(n===null || n===undefined || n==='') return '-';
+  const v = Number(n);
+  if(isNaN(v)) return '-';
+  const s = sign && v>=0 ? '+' : '';
+  return s + v.toFixed(2) + '%';
+}
+function clsPct(n){ if(n===null||n===undefined||n==='') return 'neu'; const v=Number(n); return v>0?'pos':v<0?'neg':'neu'; }
+function gradePill(g){ return `<span class="pill grade-${g}">${g||'-'}</span>`; }
+function fillPill(s){
+  if(s==='filled') return '<span class="pill fill-filled">✅進場</span>';
+  if(s==='missed') return '<span class="pill fill-missed">❌未進場</span>';
+  if(s==='watch')  return '<span class="pill fill-watch">⚠️觀察</span>';
+  return '<span class="pill fill-pending">⏳待撮合</span>';
+}
+function modePill(m, consec){
+  if(m==='strong_chase') return `<span class="pill mode-strong">🚀 追漲 (${consec||0})</span>`;
+  if(m==='watch')        return `<span class="pill mode-watch">⚠️ 觀察 (${consec||0})</span>`;
+  return '';
+}
+function zone(lo, hi){
+  if(lo===null||hi===null) return '-';
+  return `${fmt(lo,1)} ~ ${fmt(hi,1)}`;
+}
+
+function statusOf(rec){
+  if(rec.fill_status === 'missed') return {key:'pending', label:'未進場', cls:'status-pending'};
+  if(rec.fill_status === 'pending') return {key:'pending', label:'待撮合', cls:'status-pending'};
+  if(rec.hit_stoploss) return {key:'stop', label:'觸停損', cls:'status-stop'};
+  if(rec.hit_target2)  return {key:'target', label:'命中T2', cls:'status-target'};
+  if(rec.hit_target1)  return {key:'target', label:'命中T1', cls:'status-target'};
+  if(rec.settle1_done){
+    const v = Number(rec.settle1_pct);
+    return v>0 ? {key:'win', label:'勝', cls:'status-win'} : {key:'loss', label:'敗', cls:'status-loss'};
+  }
+  return {key:'pending', label:'未結算', cls:'status-pending'};
+}
+
+async function loadAll(){
+  const setText = (sel,t)=>{ const e=document.querySelector(sel); if(e) e.textContent=t; };
+  try{
+    const [t,s,h,tf,cf] = await Promise.all([
+      fetch('./data/today.json?ts='+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null),
+      fetch('./data/stats.json?ts='+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null),
+      fetch('./data/history.json?ts='+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null),
+      fetch('./data/topflow.json?ts='+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null),
+      fetch('./data/config.json?ts='+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null),
+    ]);
+    STATE.today = t; STATE.stats = s; STATE.history = h; STATE.topflow = tf; STATE.config = cf;
+    const u = (t && t.updated_at) || (s && s.updated_at) || (h && h.updated_at) || '尚未產生';
+    setText('#updated','更新時間：'+u);
+    renderToday(); renderStatus(); renderStats(); renderHistory(); renderTopFlow();
+  }catch(e){
+    setText('#updated','載入失敗：'+e.message);
+  }
+}
+
+function getApiUrl(){
+  // 1) 先用 config.json 自動偵測；2) 退回 localStorage 手動設定
+  const fromCfg = (STATE.config && STATE.config.api_url || '').trim();
+  if(fromCfg) return fromCfg.replace(/\/+$/,'');
+  return (localStorage.getItem(API_KEY) || '').trim().replace(/\/+$/,'');
+}
+
+function reloadAll(){ loadAll(); }
+
+document.querySelectorAll('.tab').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p=>p.style.display='none');
+    btn.classList.add('active');
+    document.getElementById('tab-'+btn.dataset.tab).style.display='block';
+  });
+});
+
+function renderToday(){
+  const data = STATE.today;
+  const tbody = document.getElementById('today-tbody');
+  const sumDiv = document.getElementById('today-summary');
+  if(!data){ tbody.innerHTML='<tr><td colspan="16" class="empty">尚無資料</td></tr>'; sumDiv.innerHTML=''; return; }
+  document.getElementById('today-date').textContent = data.screen_date ? '（'+data.screen_date+'）' : '';
+  const recs = data.records || [];
+  const counts = {SS:0,S:0,A:0};
+  recs.forEach(r=>{ if(counts[r.grade]!==undefined) counts[r.grade]++; });
+  sumDiv.innerHTML = `
+    <div class="stat"><div class="label">總篩選數</div><div class="value">${recs.length}</div></div>
+    <div class="stat"><div class="label">SS 級</div><div class="value" style="color:#d2b8ff">${counts.SS}</div></div>
+    <div class="stat"><div class="label">S 級</div><div class="value" style="color:#79c0ff">${counts.S}</div></div>
+    <div class="stat"><div class="label">A 級</div><div class="value" style="color:#7ee787">${counts.A}</div></div>
+  `;
+  const q = (document.getElementById('today-search').value||'').toLowerCase().trim();
+  const g = document.getElementById('today-grade').value;
+  const filtered = recs.filter(r=>{
+    if(g && r.grade!==g) return false;
+    if(q){
+      const txt = (r.sid+' '+r.name).toLowerCase();
+      if(!txt.includes(q)) return false;
+    }
+    return true;
+  });
+  if(!filtered.length){ tbody.innerHTML='<tr><td colspan="16" class="empty">無符合條件的股票</td></tr>'; return; }
+  tbody.innerHTML = filtered.map(r=>`
+    <tr>
+      <td>${gradePill(r.grade)}</td>
+      <td class="num">${r.score!=null?r.score:'-'}</td>
+      <td><b>${r.sid}</b></td>
+      <td>${r.name||''}</td>
+      <td>${modePill(r.chase_mode, r.consec_limit_up) || '<span class="neu">一般</span>'}</td>
+      <td class="num">${fmt(r.close_price)}</td>
+      <td class="num ${clsPct(r.change_pct)}">${fmtPct(r.change_pct)}</td>
+      <td class="num">${fmt(r.vol_ratio,1)}x</td>
+      <td class="num ${clsPct(r.bias_pct)}">${fmtPct(r.bias_pct)}</td>
+      <td class="num">${zone(r.entry_zone_low, r.entry_zone_high)}</td>
+      <td>${fillPill(r.fill_status)}</td>
+      <td class="num">${r.actual_entry_price?fmt(r.actual_entry_price):'-'}</td>
+      <td class="num pos">${fmt(r.actual_target1)}</td>
+      <td class="num pos">${fmt(r.actual_target2)}</td>
+      <td class="num neg">${fmt(r.actual_stop_loss)}</td>
+      <td class="num">${r.position_pct?r.position_pct+'%':'-'}</td>
+    </tr>
+  `).join('');
+}
+
+function renderStatus(){
+  const tbody = document.getElementById('status-tbody');
+  const data = STATE.history;
+  if(!data){ tbody.innerHTML='<tr><td colspan="14" class="empty">尚無資料</td></tr>'; return; }
+  const recs = data.records || [];
+  const q = (document.getElementById('status-search').value||'').toLowerCase().trim();
+  const fs = document.getElementById('status-fill').value;
+  const f = document.getElementById('status-filter').value;
+  const g = document.getElementById('status-grade').value;
+  const filtered = recs.filter(r=>{
+    if(g && r.grade!==g) return false;
+    if(fs && r.fill_status!==fs) return false;
+    if(q){
+      const txt = (r.sid+' '+r.name).toLowerCase();
+      if(!txt.includes(q)) return false;
+    }
+    if(f){
+      const st = statusOf(r);
+      if(st.key !== f) return false;
+    }
+    return true;
+  });
+  if(!filtered.length){ tbody.innerHTML='<tr><td colspan="14" class="empty">無符合條件的紀錄</td></tr>'; return; }
+  tbody.innerHTML = filtered.map(r=>{
+    const st = statusOf(r);
+    return `
+      <tr>
+        <td>${r.screen_date||''}</td>
+        <td>${gradePill(r.grade)}</td>
+        <td><b>${r.sid}</b></td>
+        <td>${r.name||''}</td>
+        <td class="num">${fmt(r.close_price)}</td>
+        <td class="num">${zone(r.entry_zone_low, r.entry_zone_high)}</td>
+        <td>${fillPill(r.fill_status)}</td>
+        <td class="num">${r.actual_entry_price?fmt(r.actual_entry_price):'-'}</td>
+        <td class="num pos">${fmt(r.actual_target1)}</td>
+        <td class="num pos">${fmt(r.actual_target2)}</td>
+        <td class="num neg">${fmt(r.actual_stop_loss)}</td>
+        <td class="num ${clsPct(r.settle1_pct)}">${r.settle1_done?fmtPct(r.settle1_pct):'-'}</td>
+        <td class="num ${clsPct(r.settle2_pct)}">${r.settle2_done?fmtPct(r.settle2_pct):'-'}</td>
+        <td class="${st.cls}">${st.label}</td>
+      </tr>`;
+  }).join('');
+}
+
+function renderStats(){
+  const data = STATE.stats;
+  const sumDiv = document.getElementById('stats-summary');
+  const gT = document.getElementById('stats-grade-tbody');
+  const bT = document.getElementById('stats-bias-tbody');
+  const mT = document.getElementById('stats-monthly-tbody');
+  if(!data){
+    sumDiv.innerHTML=''; gT.innerHTML=bT.innerHTML=mT.innerHTML='<tr><td colspan="9" class="empty">尚無資料</td></tr>';
+    return;
+  }
+  const s = data.summary || {};
+  const total   = Number(s.total)||0;
+  const filled  = Number(s.filled)||0;
+  const missed  = Number(s.missed)||0;
+  const pending = Number(s.pending)||0;
+  const decided = filled + missed;
+  const fillRate = decided>0 ? filled/decided*100 : 0;
+  const wr1 = (s.settled1>0)? (Number(s.win1)/Number(s.settled1)*100):0;
+  const wr2 = (s.settled2>0)? (Number(s.win2)/Number(s.settled2)*100):0;
+  sumDiv.innerHTML = `
+    <div class="stat">
+      <div class="label">總篩選數</div>
+      <div class="value">${fmtInt(total)}</div>
+      <div class="sub">已進場 ${fmtInt(filled)}　未進場 ${fmtInt(missed)}　待撮合 ${fmtInt(pending)}</div>
+    </div>
+    <div class="stat">
+      <div class="label">進場率</div>
+      <div class="value ${fillRate>=50?'pos':'neg'}">${fillRate.toFixed(1)}%</div>
+      <div class="sub">${fmtInt(filled)} / ${fmtInt(decided)}（已撮合）</div>
+    </div>
+    <div class="stat">
+      <div class="label">1 週賺錢勝率</div>
+      <div class="value ${wr1>=50?'pos':'neg'}">${wr1.toFixed(1)}%</div>
+      <div class="sub">${fmtInt(s.win1||0)}/${fmtInt(s.settled1||0)}　均報酬 ${fmtPct(s.avg_ret1)}</div>
+    </div>
+    <div class="stat">
+      <div class="label">2 週賺錢勝率</div>
+      <div class="value ${wr2>=50?'pos':'neg'}">${wr2.toFixed(1)}%</div>
+      <div class="sub">${fmtInt(s.win2||0)}/${fmtInt(s.settled2||0)}　均報酬 ${fmtPct(s.avg_ret2)}</div>
+    </div>
+  `;
+  const grade = data.by_grade || [];
+  gT.innerHTML = grade.length ? grade.map(r=>{
+    const t=Number(r.total)||0, fi=Number(r.filled)||0, mi=Number(r.missed)||0;
+    const fr = (fi+mi)>0 ? fi/(fi+mi)*100 : 0;
+    const s1=Number(r.settled1)||0, s2=Number(r.settled2)||0;
+    const w1=Number(r.win1)||0, w2=Number(r.win2)||0;
+    const wr1=s1?w1/s1*100:0, wr2=s2?w2/s2*100:0;
+    return `<tr>
+      <td>${gradePill(r.grade)}</td>
+      <td class="num">${t}</td>
+      <td class="num ${fr>=50?'pos':'neg'}">${fr.toFixed(1)}%<br><span class="sub">${fi}/${fi+mi}</span></td>
+      <td class="num ${wr1>=50?'pos':'neg'}">${wr1.toFixed(1)}%<br><span class="sub">${w1}/${s1}</span></td>
+      <td class="num ${clsPct(r.avg_ret1)}">${fmtPct(r.avg_ret1)}</td>
+      <td class="num ${wr2>=50?'pos':'neg'}">${wr2.toFixed(1)}%<br><span class="sub">${w2}/${s2}</span></td>
+      <td class="num ${clsPct(r.avg_ret2)}">${fmtPct(r.avg_ret2)}</td>
+      <td class="num pos">${fmtInt(r.hit_t1)} / ${fmtInt(r.hit_t2)}</td>
+      <td class="num neg">${fmtInt(r.hit_sl)}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="9" class="empty">尚無已結算資料</td></tr>';
+
+  const bias = data.by_bias || [];
+  bT.innerHTML = bias.length ? bias.map(r=>{
+    const t=Number(r.total)||0, st=Number(r.settled)||0, w=Number(r.win)||0;
+    const wr=st?w/st*100:0;
+    return `<tr>
+      <td>${r.bias_zone}</td>
+      <td class="num">${t}</td>
+      <td class="num ${wr>=50?'pos':'neg'}">${wr.toFixed(1)}%<br><span class="sub">${w}/${st}</span></td>
+      <td class="num ${clsPct(r.avg_ret)}">${fmtPct(r.avg_ret)}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="4" class="empty">尚無資料</td></tr>';
+
+  const monthly = data.by_month || [];
+  mT.innerHTML = monthly.length ? monthly.map(r=>{
+    const t=Number(r.total)||0, st=Number(r.settled)||0, w=Number(r.win)||0;
+    const wr=st?w/st*100:0;
+    return `<tr>
+      <td>${r.ym}</td>
+      <td class="num">${t}</td>
+      <td class="num">${st}</td>
+      <td class="num ${wr>=50?'pos':'neg'}">${wr.toFixed(1)}%</td>
+      <td class="num ${clsPct(r.avg_ret)}">${fmtPct(r.avg_ret)}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="5" class="empty">尚無資料</td></tr>';
+
+  // ── Timeline 折線圖 ──
+  renderTimelineChart(data.timeline);
+}
+
+function renderTimelineChart(timeline){
+  const container = document.getElementById('timeline-chart');
+  const emptyMsg  = document.getElementById('timeline-empty');
+  if(!container) return;
+  const seriesKey = (document.getElementById('timeline-series')||{}).value || 'w1';
+  const metric    = (document.getElementById('timeline-metric')||{}).value || 'winrate';
+  const data = (timeline && timeline[seriesKey]) || [];
+  if(!data.length){
+    container.innerHTML = '';
+    if(emptyMsg) emptyMsg.style.display = 'block';
+    return;
+  }
+  if(emptyMsg) emptyMsg.style.display = 'none';
+
+  // 計算每點的 y 值
+  const points = data.map(r => {
+    const wins = Number(r.wins)||0, total = Number(r.total)||0;
+    const wr   = total ? wins/total*100 : 0;
+    const ar   = Number(r.avg_ret)||0;
+    return {
+      date: r.sdate,
+      total, wins,
+      winrate: Math.round(wr*10)/10,
+      avgret:  Math.round(ar*100)/100,
+      y: metric === 'winrate' ? wr : ar,
+    };
+  });
+
+  const W = container.clientWidth || 600;
+  const H = 280;
+  const padL = 44, padR = 16, padT = 16, padB = 48;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+
+  const ys = points.map(p => p.y);
+  let yMin = Math.min(...ys, 0), yMax = Math.max(...ys, metric==='winrate'?100:5);
+  if(metric === 'winrate'){ yMin = 0; yMax = 100; }
+  else {
+    const r = Math.max(Math.abs(yMin), Math.abs(yMax), 2);
+    yMin = -r; yMax = r;  // 對稱讓 0 在中線
+  }
+  const xCount = points.length;
+  const xAt = i => padL + (xCount === 1 ? innerW/2 : i * innerW / (xCount-1));
+  const yAt = v => padT + innerH - ((v - yMin)/(yMax - yMin)) * innerH;
+
+  // Y 軸刻度（4~5 條）
+  const yTicks = [];
+  if(metric === 'winrate'){
+    [0,25,50,75,100].forEach(v => yTicks.push(v));
+  } else {
+    const step = (yMax - yMin) / 4;
+    for(let i = 0; i <= 4; i++) yTicks.push(+(yMin + i*step).toFixed(2));
+  }
+
+  // X 軸日期：太多就只顯示部分
+  const xLabelEvery = Math.max(1, Math.ceil(xCount / 8));
+
+  const lineColor   = metric === 'winrate' ? '#58a6ff' : '#bc8cff';
+  const fillGradId  = 'tlGrad' + Math.random().toString(36).slice(2,8);
+  const baseLine    = metric === 'winrate' ? 50 : 0;
+  const baseY       = yAt(baseLine);
+
+  const linePath = points.map((p,i) => `${i===0?'M':'L'}${xAt(i).toFixed(1)},${yAt(p.y).toFixed(1)}`).join(' ');
+  const fillPath = `${linePath} L${xAt(xCount-1).toFixed(1)},${baseY.toFixed(1)} L${xAt(0).toFixed(1)},${baseY.toFixed(1)} Z`;
+
+  const yGrid = yTicks.map(t => {
+    const y = yAt(t).toFixed(1);
+    return `<line x1="${padL}" y1="${y}" x2="${padL+innerW}" y2="${y}" stroke="#30363d" stroke-width="0.5"/>` +
+           `<text x="${padL-6}" y="${y}" text-anchor="end" dominant-baseline="middle" fill="#8b949e" font-size="10">${t}${metric==='winrate'?'%':''}</text>`;
+  }).join('');
+
+  // 基準線（50% / 0%）粗一點
+  const baseLineEl = `<line x1="${padL}" y1="${baseY}" x2="${padL+innerW}" y2="${baseY}" stroke="#8b949e" stroke-width="1" stroke-dasharray="3,3"/>`;
+
+  const xLabels = points.map((p,i) =>
+    (i % xLabelEvery === 0 || i === xCount-1)
+      ? `<text x="${xAt(i).toFixed(1)}" y="${(padT+innerH+14).toFixed(1)}" text-anchor="middle" fill="#8b949e" font-size="10" transform="rotate(-30 ${xAt(i).toFixed(1)} ${(padT+innerH+14).toFixed(1)})">${(p.date||'').slice(5)}</text>`
+      : '').join('');
+
+  const dots = points.map((p,i) => {
+    const cx = xAt(i).toFixed(1), cy = yAt(p.y).toFixed(1);
+    const isPos = metric==='winrate' ? p.y >= 50 : p.y >= 0;
+    const color = isPos ? '#3fb950' : '#f85149';
+    const tooltip = `${p.date}　${metric==='winrate'?'勝率 '+p.winrate+'%':'均報酬 '+(p.avgret>=0?'+':'')+p.avgret+'%'}　樣本 ${p.total}`;
+    return `<circle cx="${cx}" cy="${cy}" r="3.5" fill="${color}" stroke="#161b22" stroke-width="1.5"><title>${tooltip}</title></circle>`;
+  }).join('');
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
+      <defs>
+        <linearGradient id="${fillGradId}" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="${lineColor}" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${yGrid}
+      ${baseLineEl}
+      <path d="${fillPath}" fill="url(#${fillGradId})"/>
+      <path d="${linePath}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+      ${xLabels}
+    </svg>
+  `;
+}
+
+function renderTopFlow(){
+  const body = document.getElementById('topflow-body');
+  const dateEl = document.getElementById('topflow-date');
+  const tf = STATE.topflow;
+  if(!tf || ((!tf.buyers || !tf.buyers.length) && (!tf.sellers || !tf.sellers.length))){
+    body.innerHTML = '<div class="placeholder"><div class="icon">📊</div>'
+      + '<p><b>尚無資料</b></p>'
+      + '<p>等盤後 17:00 後 Bot 跑完當日分析才會產生。</p></div>';
+    if(dateEl) dateEl.textContent = '';
+    return;
+  }
+  if(dateEl){
+    dateEl.textContent = tf.screen_date ? '（'+tf.screen_date+'）' : '';
+  }
+  const fmtShares = n => {
+    if(n===null||n===undefined) return '-';
+    const v = Number(n);
+    if(isNaN(v)) return '-';
+    const sign = v>=0 ? '+' : '';
+    if(Math.abs(v)>=1e6) return `${sign}${(v/1e6).toFixed(2)}M`;
+    if(Math.abs(v)>=1e3) return `${sign}${(v/1e3).toFixed(0)}K`;
+    return `${sign}${v.toLocaleString('en-US')}`;
+  };
+  const trRow = (r, idx) => `
+    <tr>
+      <td class="num">${idx+1}</td>
+      <td><b>${r.sid}</b></td>
+      <td>${r.name||''}</td>
+      <td class="num">${r.close!=null?fmt(r.close):'-'}</td>
+      <td class="num ${clsPct(r.change_pct)}">${fmtPct(r.change_pct)}</td>
+      <td class="num ${r.foreign>0?'pos':'neg'}">${fmtShares(r.foreign)}</td>
+      <td class="num ${r.trust>0?'pos':r.trust<0?'neg':'neu'}">${fmtShares(r.trust)}</td>
+    </tr>`;
+  const headRow = `<thead><tr>
+    <th class="num">#</th><th>代號</th><th>名稱</th>
+    <th class="num">收盤</th><th class="num">漲幅</th>
+    <th class="num">外資(股)</th><th class="num">投信(股)</th>
+  </tr></thead>`;
+  const buyers  = (tf.buyers  || []).map((r,i) => trRow(r,i)).join('');
+  const sellers = (tf.sellers || []).map((r,i) => trRow(r,i)).join('');
+  body.innerHTML = `
+    <h4 style="margin:0 0 8px 0;color:var(--green)">🟢 外資買超 Top 10</h4>
+    <div class="scroll" style="max-height:35vh;margin-bottom:18px">
+      <table>${headRow}<tbody>${buyers || '<tr><td colspan="7" class="empty">無資料</td></tr>'}</tbody></table>
+    </div>
+    <h4 style="margin:0 0 8px 0;color:var(--red)">🔴 外資賣超 Top 10</h4>
+    <div class="scroll" style="max-height:35vh">
+      <table>${headRow}<tbody>${sellers || '<tr><td colspan="7" class="empty">無資料</td></tr>'}</tbody></table>
+    </div>`;
+}
+
+function renderHistory(){
+  const tbody = document.getElementById('history-tbody');
+  const data = STATE.history;
+  if(!data){ tbody.innerHTML='<tr><td colspan="13" class="empty">尚無資料</td></tr>'; return; }
+  const recs = data.records || [];
+  const q = (document.getElementById('history-search').value||'').toLowerCase().trim();
+  const d = document.getElementById('history-date').value;
+  const g = document.getElementById('history-grade').value;
+  const fs = document.getElementById('history-fill').value;
+  const filtered = recs.filter(r=>{
+    if(g && r.grade!==g) return false;
+    if(fs && r.fill_status!==fs) return false;
+    if(d && r.screen_date !== d) return false;
+    if(q){
+      const txt = (r.sid+' '+r.name).toLowerCase();
+      if(!txt.includes(q)) return false;
+    }
+    return true;
+  });
+  if(!filtered.length){ tbody.innerHTML='<tr><td colspan="13" class="empty">無符合條件的紀錄</td></tr>'; return; }
+  tbody.innerHTML = filtered.slice(0, 500).map(r=>{
+    const st = statusOf(r);
+    const modeBadge = modePill(r.chase_mode, r.consec_limit_up);
+    return `<tr>
+      <td>${r.screen_date||''}</td>
+      <td>${gradePill(r.grade)} ${modeBadge}</td>
+      <td class="num">${r.score!=null?r.score:'-'}</td>
+      <td><b>${r.sid}</b></td>
+      <td>${r.name||''}</td>
+      <td class="num">${fmt(r.close_price)}</td>
+      <td class="num ${clsPct(r.change_pct)}">${fmtPct(r.change_pct)}</td>
+      <td class="num ${clsPct(r.bias_pct)}">${fmtPct(r.bias_pct)}</td>
+      <td>${fillPill(r.fill_status)}</td>
+      <td class="num">${r.actual_entry_price?fmt(r.actual_entry_price):'-'}</td>
+      <td class="num ${clsPct(r.settle1_pct)}">${r.settle1_done?fmtPct(r.settle1_pct):'-'}</td>
+      <td class="num ${clsPct(r.settle2_pct)}">${r.settle2_done?fmtPct(r.settle2_pct):'-'}</td>
+      <td class="${st.cls}">${st.label}</td>
+    </tr>`;
+  }).join('') + (filtered.length>500?`<tr><td colspan="13" class="empty">已顯示前 500 筆，共 ${filtered.length} 筆，請使用篩選縮小範圍</td></tr>`:'');
+}
+
+loadAll();
+setInterval(loadAll, 5*60*1000);
+
+// ══════════ FAB + Modal ══════════
+(function(){
+  const fab        = document.getElementById('fab');
+  const fabMain    = document.getElementById('fabMain');
+  const backdrop   = document.getElementById('modal-backdrop');
+  const subs       = fab.querySelectorAll('.fab-sub');
+  const modals     = backdrop.querySelectorAll('.modal');
+
+  function closeFab(){
+    fab.classList.remove('open');
+    fabMain.classList.remove('open');
+    fabMain.textContent = '+';
+  }
+  function openFab(){
+    fab.classList.add('open');
+    fabMain.classList.add('open');
+    fabMain.textContent = '+';   // CSS rotate 會視覺上變 ✕
+  }
+  function toggleFab(){
+    if(fab.classList.contains('open')) closeFab(); else openFab();
+  }
+
+  function openModal(name){
+    modals.forEach(m => m.hidden = (m.dataset.modalContent !== name));
+    backdrop.classList.add('open');
+    if(name === 'stock')      initStockModal();
+    if(name === 'params')     renderParamsModal();
+    if(name === 'indicators') renderIndicatorsModal();
+    if(name === 'watchlist')  renderWatchlistModal();
+  }
+  function closeModal(){
+    backdrop.classList.remove('open');
+    modals.forEach(m => m.hidden = true);
+  }
+
+  // ── 個股查詢（呼叫 Bot 的 /api/stock）──
+  function initStockModal(){
+    const apiUrl = getApiUrl();
+    const cfg    = document.getElementById('stock-config');
+    const cur    = document.getElementById('api-current');
+    if(!apiUrl){
+      cfg.style.display = 'block';
+      cur.textContent = '⚠️ 目前未設定 API 網址';
+    } else {
+      cfg.style.display = 'none';
+      cur.textContent = '✅ 目前 API：' + apiUrl;
+    }
+    const inp = document.getElementById('api-input');
+    inp.value = localStorage.getItem(API_KEY) || '';
+  }
+  document.getElementById('api-save').addEventListener('click', () => {
+    const v = document.getElementById('api-input').value.trim();
+    if(v){ localStorage.setItem(API_KEY, v); }
+    else  { localStorage.removeItem(API_KEY); }
+    initStockModal();
+  });
+  document.getElementById('stock-search').addEventListener('click', () => queryStock(false));
+  document.getElementById('stock-refresh').addEventListener('click', () => queryStock(true));
+  document.getElementById('stock-input').addEventListener('keydown', e => {
+    if(e.key === 'Enter') queryStock(false);
+  });
+
+  async function queryStock(force){
+    const sid = document.getElementById('stock-input').value.trim().toUpperCase();
+    const out = document.getElementById('stock-result');
+    if(!sid){ out.innerHTML = ''; return; }
+    if(!/^[0-9A-Z]{2,6}$/.test(sid)){
+      out.innerHTML = '<div class="placeholder neg">請輸入有效的股票代號（2~6 碼）</div>';
+      return;
+    }
+    const apiUrl = getApiUrl();
+    if(!apiUrl){
+      out.innerHTML = '<div class="placeholder neg">尚未設定 API 網址，請在下方填寫 Bot 的 Public URL</div>';
+      return;
+    }
+    const hint = force ? '強制重抓中…可能需 10~20 秒' : '查詢中…約需 5~15 秒（首次需抓 6 個月 K 棒）';
+    out.innerHTML = `<div class="placeholder"><div class="icon">⏳</div>${hint}</div>`;
+    try{
+      const url = `${apiUrl}/api/stock?sid=${encodeURIComponent(sid)}` + (force ? '&force=1' : '');
+      const r = await fetch(url);
+      const j = await r.json();
+      if(!j.ok){
+        out.innerHTML = `<div class="placeholder neg">${j.error || '查詢失敗'}</div>`;
+        return;
+      }
+      out.innerHTML = renderStockCard(j.data);
+    }catch(e){
+      out.innerHTML = `<div class="placeholder neg">連線失敗：${e.message}（檢查 API 網址或 Bot 是否在線）</div>`;
+    }
+  }
+
+  // 判斷台北時間是否在交易時段（09:00–13:30 平日）
+  function isTwTradingHours(){
+    const utc = new Date();
+    // 台北 = UTC+8
+    const tw = new Date(utc.getTime() + 8*3600*1000);
+    const day = tw.getUTCDay(); // 0=Sun, 6=Sat
+    if(day === 0 || day === 6) return false;
+    const h = tw.getUTCHours(), m = tw.getUTCMinutes();
+    const mins = h*60 + m;
+    return mins >= 9*60 && mins < 13*60+30;
+  }
+  function todayTw(){
+    const tw = new Date(Date.now() + 8*3600*1000);
+    const y = tw.getUTCFullYear();
+    const M = String(tw.getUTCMonth()+1).padStart(2,'0');
+    const D = String(tw.getUTCDate()).padStart(2,'0');
+    return `${y}-${M}-${D}`;
+  }
+
+  function renderStockCard(d){
+    const sign  = d.diff >= 0 ? '+' : '';
+    const chgCls = d.change > 0 ? 'pos' : d.change < 0 ? 'neg' : 'neu';
+    const bias = d.bias || {}; const adv = d.adv || {}; const macd = d.macd || {}; const chip = d.chip || {};
+    const gradeBadge = d.grade
+      ? `<span class="pill grade-${d.grade}">${d.grade_emoji} ${d.grade} ${d.score}分</span>`
+      : `<span class="pill" style="background:#8b949e33;color:#c9d1d9">未達門檻 (${d.score}分)</span>`;
+
+    let chaseHtml = '';
+    if(d.chase_mode === 'strong_chase'){
+      chaseHtml = `<div class="panel" style="margin-bottom:0;border-color:#f85149">
+        <h4 style="margin:0 0 6px 0;color:#ffa198">🚀 強勢追漲（連續 ${d.consec_limit_up} 日漲停，5/5 達標）</h4>
+        <p style="margin:0">進場區間：<b>${d.entry_zone_low} ~ ${d.entry_zone_high}</b> 元（容忍跳空 0~7%）</p>
+        <p style="margin:6px 0 0 0;color:var(--muted);font-size:12px">T+1 開盤在區間以開盤價買；跳空 >7% 放棄；跌破收盤不接刀</p>
+      </div>`;
+    } else if(d.chase_mode === 'watch'){
+      chaseHtml = `<div class="panel" style="margin-bottom:0;border-color:#d29922">
+        <h4 style="margin:0 0 6px 0;color:#f0c674">⚠️ 觀察名單（連續 ${d.consec_limit_up} 日漲停，僅 ${d.chase_check.passed}/5 過）</h4>
+        <p style="margin:0">不建議買進，僅供觀察</p>
+        <ul style="margin:6px 0 0 0;padding-left:18px;font-size:12px">${d.chase_check.reasons.map(r=>'<li>'+r+'</li>').join('')}</ul>
+      </div>`;
+    } else if(d.chase_mode === 'reject'){
+      chaseHtml = `<div class="panel" style="margin-bottom:0;border-color:#f85149">
+        <h4 style="margin:0;color:#ffa198">❌ 連續 ${d.consec_limit_up} 日漲停但僅 ${d.chase_check.passed}/5 過 — 風險過高，不推薦</h4>
+      </div>`;
+    } else {
+      chaseHtml = `<div class="panel" style="margin-bottom:0">
+        <h4 style="margin:0 0 6px 0">🎯 建議進場區（限價單）</h4>
+        <p style="margin:0">進場區間：<b>${d.entry_zone_low} ~ ${d.entry_zone_high}</b> 元</p>
+        <p style="margin:4px 0 0 0">預估目標：<span class="pos">+${d.est_target1}</span> / <span class="pos">+${d.est_target2}</span>　預估停損：<span class="neg">${d.est_stop_loss}</span></p>
+        <p style="margin:6px 0 0 0;color:var(--muted);font-size:12px">隔日 T+1 觸及才算進場；以實際成交價為準，目標 +5%/+10%、停損 -5%</p>
+      </div>`;
+    }
+
+    const fmtSh = n => {
+      if(n===null||n===undefined) return '-';
+      const v = Number(n); if(isNaN(v)) return '-';
+      const s = v>=0?'+':'';
+      if(Math.abs(v)>=1e6) return `${s}${(v/1e6).toFixed(2)}M`;
+      if(Math.abs(v)>=1e3) return `${s}${(v/1e3).toFixed(0)}K`;
+      return `${s}${v.toLocaleString('en-US')}`;
+    };
+
+    const advRows = [];
+    if(macd.macd_label) advRows.push(['MACD', macd.macd_label]);
+    if(adv.rsi_label)        advRows.push(['RSI',   adv.rsi_label]);
+    if(adv.resistance_label) advRows.push(['壓力位', adv.resistance_label]);
+    if(adv.position_label)   advRows.push(['位階',  adv.position_label]);
+    if(adv.obv_label)        advRows.push(['OBV',   adv.obv_label]);
+    if(chip.label && chip.score > 0) advRows.push(['籌碼', chip.label]);
+    if(adv.atr_stop)         advRows.push(['動態停損(2×ATR)', `${adv.atr_stop} 元（${adv.atr_pct}%）`]);
+
+    // 資料日期 + 即時性提示
+    const today = todayTw();
+    const dataDate = d.latest_kbar_date || '?';
+    const isStale = dataDate && dataDate !== today;
+    const isIntraday = isTwTradingHours();
+    let freshnessNote = '';
+    if(isStale && isIntraday){
+      freshnessNote = `<div style="background:#d2992233;color:#f0c674;border:1px solid #d2992266;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:10px">
+        ⏰ 目前為盤中時段，TWSE 當日 K 棒尚未上架。顯示為 <b>${dataDate}</b> 收盤資料。當日資料一般在收盤後 30~90 分鐘可用，可按 🔄 強制重抓。
+      </div>`;
+    } else if(isStale){
+      freshnessNote = `<div style="background:#d2992233;color:#f0c674;border:1px solid #d2992266;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:10px">
+        ℹ️ 資料截至 <b>${dataDate}</b>（非當日）。若 TWSE 已更新，可按 🔄 強制重抓。
+      </div>`;
+    }
+    const cacheTag = d._from_cache ? '<span class="pill" style="background:#8b949e33;color:#c9d1d9;font-size:10px;margin-left:6px">📦 快取</span>' : '';
+    const emaWarn  = d.ema_mode === 'fallback'
+      ? `<span class="pill" style="background:#d2992233;color:#f0c674;font-size:10px;margin-left:6px" title="K 棒不足 120 天，改用 10/20/60 EMA 計算（部分月份抓取失敗）">⚠️ 備援 EMA</span>`
+      : '';
+
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div>
+          <h3 style="margin:0;display:inline-block">${d.sid}</h3>
+          ${cacheTag}${emaWarn}
+        </div>
+        ${gradeBadge}
+      </div>
+      <p style="margin:0 0 10px 0;color:var(--muted);font-size:12px">
+        資料截至：<b>${dataDate}</b>　K 棒筆數：${d.kbar_count}　查詢於：${d.queried_at||''}
+      </p>
+      ${freshnessNote}
+      <div class="panel" style="margin-bottom:12px">
+        <h4 style="margin:0 0 6px 0">🔹 基本資料</h4>
+        <p style="margin:0">收盤：<b>${d.price}</b>　漲幅：<span class="${chgCls}">${sign}${d.change}%</span>　量比：${d.vol_ratio}x</p>
+        ${d.foreign!=null?`<p style="margin:4px 0 0 0">外資：<span class="${d.foreign>0?'pos':'neg'}">${fmtSh(d.foreign)}</span> 股　投信：<span class="${d.trust>0?'pos':d.trust<0?'neg':'neu'}">${fmtSh(d.trust)}</span> 股</p>`:''}
+        ${bias.bias_pct!=null?`<p style="margin:4px 0 0 0">乖離率（10日）：<span class="${clsPct(bias.bias_pct)}">${bias.bias_pct>=0?'+':''}${bias.bias_pct}%</span> ${bias.bias_emoji||''} ${bias.bias_label||''}</p>`:''}
+      </div>
+      ${chaseHtml}
+      ${advRows.length?`
+        <div class="panel" style="margin-top:12px;margin-bottom:0">
+          <h4 style="margin:0 0 8px 0">📊 輔助數據</h4>
+          ${advRows.map(([k,v])=>`<p style="margin:3px 0">${k}：${v}</p>`).join('')}
+        </div>`:''}
+      <p style="margin:14px 0 0 0;text-align:center;color:var(--muted);font-size:12px">📝 ${d.rec}</p>
+    `;
+  }
+
+  fabMain.addEventListener('click', toggleFab);
+  subs.forEach(btn => btn.addEventListener('click', e => {
+    const name = btn.dataset.modal;
+    closeFab();
+    openModal(name);
+  }));
+
+  // 點 backdrop 空白處關閉；點 modal 內部不關
+  backdrop.addEventListener('click', e => {
+    if(e.target === backdrop) closeModal();
+  });
+  // 關閉鈕
+  backdrop.querySelectorAll('.modal-close').forEach(btn =>
+    btn.addEventListener('click', closeModal));
+
+  // ESC 關閉
+  document.addEventListener('keydown', e => {
+    if(e.key === 'Escape'){
+      if(backdrop.classList.contains('open')) closeModal();
+      else if(fab.classList.contains('open'))  closeFab();
+    }
+  });
+
+  // ══════════ 策略參數一覽 ══════════
+  function renderParamsModal(){
+    document.getElementById('params-body').innerHTML = `
+      <h4>🎯 篩選漏斗（依序執行）</h4>
+      <div class="kv">
+        <div class="k">第一輪</div><div>收盤 ≥ <code>10</code> 元　漲幅 ≥ <code>1%</code>　法人雙買超 <b>or</b> 單方買超 ≥ 100K 股</div>
+        <div class="k"></div><div>取法人合計買超 <b>前 30 名</b></div>
+        <div class="k">第二輪</div><div>量比 ≥ <code>1.5x</code>（當日量 ÷ 5 日均量）</div>
+        <div class="k"></div><div>EMA 多頭排列：<code>20 &gt; 60 &gt; 120</code>（資料不足 120 天用備援 <code>10 &gt; 20 &gt; 60</code>）</div>
+        <div class="k">第三輪</div><div>計算 8 項評分（見下方）</div>
+      </div>
+
+      <h4>📐 評分權重（v4，總分 100+）</h4>
+      <table class="simple">
+        <thead><tr><th>項目</th><th class="num">配分</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td>漲幅</td><td class="num">10</td><td>3~5% 滿分；&gt;7% 反而扣分（漲停難進場）</td></tr>
+          <tr><td>量比</td><td class="num">20</td><td>≥3x 滿分</td></tr>
+          <tr><td>法人買超強度</td><td class="num">20</td><td>雙買超 + 合計 ≥50 萬股 滿分</td></tr>
+          <tr><td>乖離率</td><td class="num">20</td><td>0~3% 滿分；&gt;8% 直接 0 分</td></tr>
+          <tr><td>RSI</td><td class="num">10</td><td>60~80 滿分；&gt;80 過熱扣分</td></tr>
+          <tr><td>壓力位</td><td class="num">10</td><td>無明顯壓力滿分</td></tr>
+          <tr><td>位階</td><td class="num">5</td><td>偏低滿分;高位扣分</td></tr>
+          <tr><td>MACD</td><td class="num">10</td><td>黃金交叉 +DIF&gt;0 滿分；空頭排列 0 分</td></tr>
+        </tbody>
+      </table>
+      <p class="note">加減項：籌碼集中度 0~+8、大盤環境 +3~−5、融資增幅 +3~−8</p>
+
+      <h4>🏆 等級門檻</h4>
+      <div class="kv">
+        <div class="k">SS 級</div><div>≥ <code>85</code> 分</div>
+        <div class="k">S 級</div><div>≥ <code>68</code> 分</div>
+        <div class="k">A 級</div><div>≥ <code>52</code> 分</div>
+        <div class="k">淘汰</div><div>&lt; 52 分</div>
+      </div>
+
+      <h4>🎯 進場規則</h4>
+      <div class="kv">
+        <div class="k">一般股</div><div>進場區間 = <code>[close × 0.97, close × 1.00]</code></div>
+        <div class="k"></div><div>T+1 觸到區間 → 成交；沒觸到 → 未進場（不計入賺錢勝率）</div>
+        <div class="k"></div><div>跳空跌破收盤 → 撿便宜成交</div>
+        <div class="k">強勢追漲</div><div>連續 ≥3 日漲停且 5 項條件全過：區間 = <code>[close × 1.00, close × 1.07]</code></div>
+        <div class="k"></div><div>跳空跌破收盤 → <b>不接刀</b>（趨勢反轉訊號）</div>
+        <div class="k">目標 / 停損</div><div><span class="pos">+5%</span> / <span class="pos">+10%</span> / <span class="neg">−5%</span>（基於實際成交價）</div>
+      </div>
+
+      <h4>🚀 強勢追漲 5 項門檻（連續 ≥3 日漲停才檢查）</h4>
+      <ol class="note" style="padding-left:20px">
+        <li>法人合計買超（外資+投信）≥ <b>200K 股</b></li>
+        <li>量比 ≥ <b>2.0x</b></li>
+        <li>籌碼集中度 ≥ <b>10%</b>（法人淨買 / 成交量）</li>
+        <li>MACD：DIF &gt; DEA 且 Histogram 擴張中</li>
+        <li>大盤環境分數 ≥ <b>0</b></li>
+      </ol>
+      <p class="note">5/5 過 → 🚀 強勢追漲；4/5 過 → ⚠️ 觀察名單（不買）；&lt;4 → 跳過</p>
+
+      <h4>📊 結算邏輯</h4>
+      <div class="kv">
+        <div class="k">第一次</div><div>實際進場日 → 下個週五（5 個交易日）</div>
+        <div class="k">第二次</div><div>實際進場日 → 再下個週五（10 個交易日）</div>
+        <div class="k">觸停損</div><div>持有期間 low ≤ 停損價 → settle_pct 強制視為 −5%</div>
+        <div class="k">觸目標</div><div>持有期間 high ≥ 目標 → 記旗標（不影響報酬，讓利潤奔跑）</div>
+        <div class="k">假日</div><div>結算日若為國定假日，自動採用最後可用交易日收盤</div>
+      </div>
+
+      <h4>📈 雙勝率指標</h4>
+      <div class="kv">
+        <div class="k">進場率</div><div><code>filled / (filled + missed)</code></div>
+        <div class="k">賺錢勝率</div><div><code>(filled & settle_pct &gt; 0) / filled</code></div>
+      </div>
+
+      <h4>🔄 自動排程（台灣時間）</h4>
+      <div class="kv">
+        <div class="k">週一~五 17:00</div><div>盤後分析 + T+1 撮合昨日批次</div>
+        <div class="k">週一~五 18~20:00</div><div>17:00 失敗則自動補跑（最多 3 次）</div>
+        <div class="k">週五 18:00</div><div>1 週 + 2 週結算</div>
+        <div class="k">週五 21:00</div><div>選股挑戰結算清零</div>
+      </div>
+    `;
+  }
+
+  // ══════════ 指標教學 ══════════
+  function renderIndicatorsModal(){
+    document.getElementById('indicators-body').innerHTML = `
+      <h4>📊 量比（Volume Ratio）</h4>
+      <p class="note">當日成交量 ÷ 近 5 日平均成交量。&gt;1 表示放量，&gt;1.5 視為明顯放量，&gt;3 為爆量。
+      篩選門檻 1.5x 過濾掉縮量上漲（後繼無力）。</p>
+
+      <h4>📐 乖離率 BIAS（10 日）</h4>
+      <p class="note"><code>(現價 − MA10) / MA10 × 100%</code>。代表股價偏離 10 日均線的程度。
+      &gt;8% = 過熱（追高風險高，回檔機率大）；0~5% = 理想進場區；&lt;0% = 在均線下方，可能在打底。</p>
+
+      <h4>📈 RSI 相對強弱指數（14 日）</h4>
+      <p class="note">用過去 14 日漲跌幅平均比率衡量買賣力道。
+      <b>&gt;80</b> 過熱（短期可能拉回）；<b>60~80</b> 強勢動能（最佳）；
+      <b>50~60</b> 中性偏多；<b>&lt;50</b> 弱勢。</p>
+
+      <h4>📉 MACD 指數平滑移動平均背離</h4>
+      <p class="note">由 <b>DIF = EMA(12) − EMA(26)</b> 與 <b>DEA = EMA(DIF, 9)</b> 構成。
+      Histogram = DIF − DEA 顯示動能強弱。</p>
+      <ul class="note" style="padding-left:20px">
+        <li><b>DIF 上穿 DEA</b>（黃金交叉）→ 多頭轉折訊號</li>
+        <li><b>DIF &gt; DEA + Hist 擴張</b> → 多頭動能加強</li>
+        <li><b>DIF &gt; DEA + Hist 萎縮</b> → 動能轉弱（高點警訊）</li>
+        <li><b>DIF &lt; DEA</b> → 空頭排列</li>
+      </ul>
+
+      <h4>📏 EMA 多頭排列</h4>
+      <p class="note">指數移動平均線。<b>20 &gt; 60 &gt; 120</b> 表示短中長期均線都向上排列，是強多頭趨勢的指標。
+      系統用此作為硬過濾，沒有多頭排列直接淘汰（資料不足 120 天時用備援 10/20/60）。</p>
+
+      <h4>🛡️ ATR 平均真實波幅（14 日）</h4>
+      <p class="note">衡量價格波動率，用於計算「動態停損」。
+      停損 = 進場價 − 2 × ATR，相對固定 −5% 更貼合該股的波動特性。</p>
+
+      <h4>🔋 OBV 能量潮</h4>
+      <p class="note">累積成交量加減：上漲日加上量、下跌日減去量。
+      用來偵測<b>量價背離</b> — 例如價格創新高但 OBV 沒有，可能是假突破。</p>
+
+      <h4>🪙 籌碼集中度</h4>
+      <p class="note"><code>法人淨買超 / 成交量 × 100%</code>。
+      &gt;20% = 主力強力進場；10~20% = 法人積極布局；5~10% = 一般籌碼流入；&lt;5% = 散戶為主。</p>
+
+      <h4>📊 壓力位 / 位階</h4>
+      <p class="note">
+      <b>壓力位</b>：取近 60 日高點為壓力，現價接近壓力時目標難達成（扣分）。<br>
+      <b>位階</b>：現價在近 60 日 high-low 區間的相對位置。&lt;30% 偏低（可能起漲）；&gt;70% 偏高（追高風險）。</p>
+
+      <h4>🚀 連續漲停</h4>
+      <p class="note">日漲幅 ≥ 9.5% 視為漲停（含計算誤差）。
+      連續 ≥3 日漲停會啟動「強勢追漲」流程，需通過 5 項門檻才推薦追進。</p>
+    `;
+  }
+
+  // ══════════ 追蹤清單 ══════════
+  const WATCHLIST_KEY = 'stockbot_watchlist';
+  function loadWatchlist(){
+    try{ return JSON.parse(localStorage.getItem(WATCHLIST_KEY) || '[]') || []; }
+    catch(_){ return []; }
+  }
+  function saveWatchlist(list){
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list));
+  }
+  function addToWatchlist(sid, name){
+    sid = sid.trim().toUpperCase();
+    if(!sid) return false;
+    const list = loadWatchlist();
+    if(list.find(x => x.sid === sid)) return false;
+    list.unshift({sid, name: (name||'').trim(), addedAt: new Date().toISOString().slice(0,10)});
+    saveWatchlist(list);
+    return true;
+  }
+  function removeFromWatchlist(sid){
+    const list = loadWatchlist().filter(x => x.sid !== sid);
+    saveWatchlist(list);
+  }
+
+  function renderWatchlistModal(){
+    const body = document.getElementById('watchlist-body');
+    const list = loadWatchlist();
+    body.innerHTML = `
+      <p class="note">追蹤清單儲存在你瀏覽器本機（localStorage），不會上傳到伺服器。</p>
+      <div style="display:flex;gap:8px;align-items:center;margin:10px 0">
+        <input type="search" id="wl-sid" placeholder="股票代號（例 2330）"
+               style="width:160px;font-size:14px;padding:8px 10px" maxlength="6" autocomplete="off">
+        <input type="text" id="wl-name" placeholder="名稱（選填）"
+               style="flex:1;font-size:14px;padding:8px 10px" maxlength="30">
+        <button class="btn" id="wl-add" style="padding:8px 14px">⭐ 加入</button>
+      </div>
+      <div id="wl-list" style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        ${list.length ? list.map(item => `
+          <div class="watchlist-row" data-sid="${item.sid}">
+            <span class="sid" data-action="query">${item.sid}</span>
+            <span class="name">${item.name||''}</span>
+            <span class="added">${item.addedAt}</span>
+            <button data-action="remove">✕ 移除</button>
+          </div>`).join('') : '<div class="placeholder">尚未追蹤任何股票</div>'}
+      </div>
+      <p class="note" style="margin-top:10px">提示：點代號可跳到「個股查詢」直接分析；點 ✕ 移除。</p>
+    `;
+    // 綁事件
+    document.getElementById('wl-add').addEventListener('click', () => {
+      const s = document.getElementById('wl-sid').value;
+      const n = document.getElementById('wl-name').value;
+      if(!/^[0-9A-Z]{2,6}$/i.test(s.trim())){
+        alert('請輸入有效的股票代號（2~6 碼）');
+        return;
+      }
+      if(addToWatchlist(s, n)) renderWatchlistModal();
+      else alert('該代號已在追蹤清單中');
+    });
+    document.getElementById('wl-list').addEventListener('click', (e) => {
+      const row = e.target.closest('.watchlist-row');
+      if(!row) return;
+      const sid = row.dataset.sid;
+      const action = e.target.dataset.action;
+      if(action === 'remove'){
+        removeFromWatchlist(sid);
+        renderWatchlistModal();
+      } else if(action === 'query'){
+        // 切到個股查詢 modal 並自動執行
+        modals.forEach(m => m.hidden = (m.dataset.modalContent !== 'stock'));
+        initStockModal();
+        document.getElementById('stock-input').value = sid;
+        queryStock(false);
+      }
+    });
+    // Enter 鍵也可加入
+    document.getElementById('wl-sid').addEventListener('keydown', e => {
+      if(e.key === 'Enter') document.getElementById('wl-add').click();
+    });
+    document.getElementById('wl-name').addEventListener('keydown', e => {
+      if(e.key === 'Enter') document.getElementById('wl-add').click();
+    });
+  }
+})();
