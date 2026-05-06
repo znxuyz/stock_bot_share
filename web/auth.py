@@ -25,7 +25,7 @@ def require_auth(handler) -> bool:
     if is_authed(handler):
         return True
     handler.send_response(401)
-    handler.send_header('WWW-Authenticate', 'Basic realm="stock_bot_share"')
+    handler.send_header('WWW-Authenticate', 'Basic realm="stock-bot"')
     handler.send_header('Content-Type', 'text/plain; charset=utf-8')
     handler.end_headers()
     handler.wfile.write('需要密碼\n'.encode('utf-8'))
