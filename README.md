@@ -6,6 +6,8 @@ TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進
 買賣紀錄、選股挑戰、手動觸發分析等操作改在
 [`docs/admin.html`](docs/admin.html) 上完成。
 
+> 📖 **第一次用？** 先看 [`SETUP_GUIDE.md`](SETUP_GUIDE.md)，裡面有部署一次性步驟（給技術人員）+ 日常使用說明（給爸爸）。
+
 | 服務 | 連結 |
 |------|------|
 | 後端 HTTP（Railway） | _部署後填入_ |
@@ -34,6 +36,8 @@ TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進
 ---
 
 ## 部署（Railway）
+
+完整步驟見 [`SETUP_GUIDE.md`](SETUP_GUIDE.md) 的 A 部分。簡略：
 
 1. **新建 Railway 專案** → Connect to `znxuyz/stock_bot_share`
 2. **加 PostgreSQL plugin**（Railway 自動注入 `DATABASE_URL`）
@@ -77,6 +81,7 @@ TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進
 
 ```
 stock_bot_share/
+├── SETUP_GUIDE.md              # 新手操作說明（部署 + 日常使用）
 ├── app.py                      # 進入點（HTTP server + scheduler）
 ├── config.py                   # 環境變數 / 策略常數
 ├── analysis.py                 # 盤後篩選主流程（無 Discord）
@@ -104,7 +109,8 @@ stock_bot_share/
 │   └── state.py                # LAST_RUN（執行緒安全）
 │
 ├── docs/                       # GitHub Pages
-│   ├── index.html              # Dashboard（與 my_stock_bot 同）
+│   ├── index.html              # Dashboard 主頁（HTML + CSS）
+│   ├── dashboard.js            # Dashboard JS 邏輯（4 分頁 + FAB）
 │   ├── admin.html              # 操作面板（單人版專用）
 │   └── data/*.json
 │
