@@ -64,6 +64,7 @@ async function loadAll(){
     STATE.today = t; STATE.stats = s; STATE.history = h; STATE.topflow = tf; STATE.config = cf;
     const u = (t && t.updated_at) || (s && s.updated_at) || (h && h.updated_at) || '尚未產生';
     setText('#updated','更新時間：'+u);
+    updateRepoLink();
     renderToday(); renderStatus(); renderStats(); renderHistory(); renderTopFlow();
   }catch(e){
     setText('#updated','載入失敗：'+e.message);
@@ -75,6 +76,19 @@ function getApiUrl(){
   const fromCfg = (STATE.config && STATE.config.api_url || '').trim();
   if(fromCfg) return fromCfg.replace(/\/+$/,'');
   return (localStorage.getItem(API_KEY) || '').trim().replace(/\/+$/,'');
+}
+
+// dashboard footer 「原始碼」連結 — 從 config.github_repo 自動帶
+function updateRepoLink(){
+  const a = document.getElementById('repo-link');
+  if(!a) return;
+  const repo = (STATE.config && STATE.config.github_repo || '').trim();
+  if(repo){
+    a.href = 'https://github.com/' + repo;
+    a.hidden = false;
+  } else {
+    a.hidden = true;
+  }
 }
 
 function reloadAll(){ loadAll(); }
