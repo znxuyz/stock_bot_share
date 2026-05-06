@@ -7,8 +7,8 @@
 1. 進到 repo → **Settings** → **Pages**
 2. **Source**：選 `Deploy from a branch`
 3. **Branch**：選 `main`，資料夾選 `/docs`
-4. 按 **Save**，等 1~2 分鐘後 Pages 就會發佈到
-   `https://znxuyz.github.io/stock_bot_share/`
+4. 按 **Save**，等 1~2 分鐘後 Pages 就會發布到
+   `https://<your-username>.github.io/<your-repo>/`
 
 ## 自動更新
 
@@ -24,11 +24,11 @@
 
 | 變數 | 用途 |
 |------|------|
-| `GITHUB_TOKEN` | Personal Access Token（fine-grained，需 `Contents: Read & Write`） |
-| `GITHUB_REPO`  | 預設 `znxuyz/stock_bot_share` |
+| `GITHUB_TOKEN` | Personal Access Token（fine-grained，需 **Contents: Read and write**） |
+| `GITHUB_REPO`  | 你的 repo，格式 `your-name/your-repo` |
 | `GITHUB_BRANCH`| 預設 `main` |
 
-若未設定 `GITHUB_TOKEN`，服務仍會在本機寫檔，但不會推到 GitHub。
+若未設定 `GITHUB_TOKEN` 或 `GITHUB_REPO`，服務仍會在本機寫檔，但不會推到 GitHub。
 
 ## 個股查詢 / 操作（admin.html）
 
