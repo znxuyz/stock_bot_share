@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>操作面板 ─ 川投顧量化系統</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🛠️%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0e1117;--panel:#161b22;--panel2:#1f242c;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;
+  --green:#3fb950;--red:#f85149;--yellow:#d29922;
+  font-size: clamp(13px, 3.5vw, 16px);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  font-size:1rem}
+a{color:var(--accent);text-decoration:none}
+header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;
+  padding:14px 22px;border-bottom:1px solid var(--border);background:var(--panel)}
+header h1{margin:0;font-size:1.15rem}
+header h1 small{font-weight:400;color:var(--muted);margin-left:8px;font-size:0.75rem}
+.container{max-width:900px;margin:0 auto;padding:18px}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;
+  padding:16px;margin-bottom:16px}
+.panel h2{margin:0 0 12px 0;font-size:1rem}
+label{display:block;color:var(--muted);font-size:0.8rem;margin-bottom:4px}
+input[type=text],input[type=number],input[type=password],select{
+  width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--border);
+  padding:8px 10px;border-radius:6px;font-size:0.9rem;font-family:inherit}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.row > div{flex:1;min-width:120px}
+button{background:var(--accent);color:#fff;border:none;padding:8px 16px;
+  border-radius:6px;font-size:0.9rem;cursor:pointer;font-family:inherit}
+button:hover{filter:brightness(1.1)}
+button.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+button.danger{background:var(--red)}
+.out{margin-top:10px;padding:10px;background:var(--panel2);border-radius:6px;
+  font-family:ui-monospace,Menlo,monospace;font-size:0.8rem;white-space:pre-wrap;
+  max-height:240px;overflow:auto}
+.out.empty{display:none}
+table{width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:8px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left}
+th{color:var(--muted);font-weight:600;background:var(--panel2)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.pos{color:var(--green)}
+.neg{color:var(--red)}
+.muted{color:var(--muted)}
+.banner{padding:10px 14px;border-radius:6px;background:var(--panel2);
+  border:1px solid var(--border);font-size:0.85rem;margin-bottom:14px}
+.banner.success{border-color:#3fb95066}
+.banner.error{border-color:#f8514966}
+.banner.running{border-color:#d2992266}
+footer{text-align:center;color:var(--muted);font-size:0.75rem;padding:18px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🛠️ 操作面板 <small>stock_bot_share</small></h1>
+  <a href="./index.html">← 回 Dashboard</a>
+</header>
+
+<div class="container">
+
+  <!-- ── 服務位址 ── -->
+  <div class="panel">
+    <h2>📡 服務位址</h2>
+    <p class="muted" style="margin:0 0 8px 0;font-size:0.85rem">
+      請填寫 Railway 部署的後端 URL（例：<code>https://stockbotshare.up.railway.app</code>）。
+      設定後會存到瀏覽器 localStorage，下次開啟會自動帶入。
+    </p>
+    <div class="row">
+      <div>
+        <label>API URL</label>
+        <input id="apiUrl" type="text" placeholder="https://your-service.up.railway.app">
+      </div>
+      <div style="flex:0">
+        <label>&nbsp;</label>
+        <button onclick="saveApiUrl()">儲存</button>
+      </div>
+    </div>
+    <div id="apiOut" class="out empty"></div>
+  </div>
+
+  <!-- ── 最後一次分析狀態 ── -->
+  <div class="panel">
+    <h2>📋 最後一次分析</h2>
+    <div id="lastRunBanner" class="banner muted">尚未載入...</div>
+    <button class="secondary" onclick="loadLastRun()">重新整理</button>
+  </div>
+
+  <!-- ── 觸發盤後分析 ── -->
+  <div class="panel">
+    <h2>🚀 觸發盤後分析</h2>
+    <p class="muted" style="margin:0 0 8px 0;font-size:0.85rem">
+      手動執行一次（約 3-5 分鐘）。一般情況下不需要按，17:00 會自動跑。
+    </p>
+    <div class="row">
+      <div>
+        <label>模式</label>
+        <select id="runMode">
+          <option value="auto">auto（自動判斷）</option>
+          <option value="close">close（盤後結算）</option>
+          <option value="preview">preview（盤前複習）</option>
+        </select>
+      </div>
+      <div style="flex:0">
+        <label>&nbsp;</label>
+        <button onclick="triggerRun()">執行</button>
+      </div>
+    </div>
+    <div id="runOut" class="out empty"></div>
+  </div>
+
+  <!-- ── 持倉 ── -->
+  <div class="panel">
+    <h2>💼 持倉</h2>
+    <button class="secondary" onclick="loadHoldings()">載入持倉</button>
+    <div id="holdingsTable"></div>
+  </div>
+
+  <!-- ── 買入 ── -->
+  <div class="panel">
+    <h2>🛒 買入</h2>
+    <div class="row">
+      <div><label>代號</label><input id="buySid" type="text" placeholder="2330"></div>
+      <div><label>價格</label><input id="buyPrice" type="number" step="0.1" placeholder="600"></div>
+      <div><label>股數</label><input id="buyShares" type="number" placeholder="1000"></div>
+      <div style="flex:0"><label>&nbsp;</label><button onclick="doBuy()">買入</button></div>
+    </div>
+    <div id="buyOut" class="out empty"></div>
+  </div>
+
+  <!-- ── 賣出 ── -->
+  <div class="panel">
+    <h2>💸 賣出（FIFO）</h2>
+    <div class="row">
+      <div><label>代號</label><input id="sellSid" type="text" placeholder="2330"></div>
+      <div><label>價格</label><input id="sellPrice" type="number" step="0.1" placeholder="650"></div>
+      <div><label>股數</label><input id="sellShares" type="number" placeholder="1000"></div>
+      <div style="flex:0"><label>&nbsp;</label><button class="danger" onclick="doSell()">賣出</button></div>
+    </div>
+    <div id="sellOut" class="out empty"></div>
+  </div>
+
+  <!-- ── 選股挑戰 ── -->
+  <div class="panel">
+    <h2>⚔️ 本週選股挑戰</h2>
+    <div class="row">
+      <div><label>加入挑戰（代號）</label><input id="chSid" type="text" placeholder="2330"></div>
+      <div style="flex:0"><label>&nbsp;</label><button onclick="addChallenge()">加入</button></div>
+      <div style="flex:0"><label>&nbsp;</label><button class="secondary" onclick="loadChallenges()">查看</button></div>
+    </div>
+    <div id="chOut" class="out empty"></div>
+    <div id="chTable"></div>
+  </div>
+
+</div>
+
+<footer>
+  <p>本面板僅供研究用途，不構成投資建議。</p>
+</footer>
+
+<script>
+const API_KEY = 'sbs_api_url';
+
+function getApiBase(){
+  return (document.getElementById('apiUrl').value || '').trim().replace(/\/$/, '');
+}
+function saveApiUrl(){
+  const v = getApiBase();
+  if(v) localStorage.setItem(API_KEY, v);
+  else  localStorage.removeItem(API_KEY);
+  show('apiOut', '已儲存：' + (v || '(空)'));
+  loadLastRun();
+}
+function show(id, text, kind){
+  const el = document.getElementById(id);
+  el.textContent = typeof text === 'string' ? text : JSON.stringify(text, null, 2);
+  el.classList.remove('empty');
+  if(kind === 'error') el.style.borderLeft = '3px solid var(--red)';
+  else if(kind === 'success') el.style.borderLeft = '3px solid var(--green)';
+  else el.style.borderLeft = '';
+}
+async function api(path, opts){
+  const base = getApiBase();
+  if(!base) throw new Error('請先設定 API URL');
+  const r = await fetch(base + path, opts);
+  let data;
+  try { data = await r.json(); }
+  catch(e){ throw new Error('回應解析失敗 HTTP ' + r.status); }
+  if(!r.ok && r.status !== 202 && r.status !== 409){
+    throw new Error(data.error || ('HTTP ' + r.status));
+  }
+  return data;
+}
+async function loadLastRun(){
+  const banner = document.getElementById('lastRunBanner');
+  try {
+    const j = await api('/api/last_run');
+    const d = j.data || {};
+    let kind = '';
+    let txt = '';
+    if(!d.time){
+      txt = 'ℹ️ 尚未執行過分析'; kind = '';
+    } else {
+      const emo = {success:'✅', running:'⏳', error:'❌', fail:'❌', holiday:'🏖️'}[d.status] || '❓';
+      txt = `${emo} ${d.time}　模式 ${d.mode || '-'}　日期 ${d.date || '-'}　狀態 ${d.status || '-'}`;
+      if(d.error) txt += '\n錯誤：' + d.error;
+      kind = d.status === 'success' ? 'success'
+           : d.status === 'running' ? 'running'
+           : d.status ? 'error' : '';
+    }
+    banner.textContent = txt;
+    banner.className = 'banner ' + (kind || 'muted');
+  } catch(e){
+    banner.textContent = '⚠️ 無法載入：' + e.message;
+    banner.className = 'banner error';
+  }
+}
+async function triggerRun(){
+  const mode = document.getElementById('runMode').value;
+  show('runOut', '送出中...');
+  try {
+    const j = await api('/api/run', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({mode}),
+    });
+    show('runOut', j, j.ok ? 'success' : 'error');
+    setTimeout(loadLastRun, 1500);
+  } catch(e){
+    show('runOut', '失敗：' + e.message, 'error');
+  }
+}
+async function loadHoldings(){
+  const wrap = document.getElementById('holdingsTable');
+  wrap.innerHTML = '<p class="muted">載入中...</p>';
+  try {
+    const j = await api('/api/holding');
+    const d = j.data;
+    if(!d.items.length){ wrap.innerHTML = '<p class="muted">目前無持倉</p>'; return; }
+    let html = `<table><thead><tr>
+      <th>代號</th><th class="num">成本價</th><th class="num">股數</th>
+      <th>買入日</th><th class="num">現價</th>
+      <th class="num">未實現損益</th><th class="num">漲跌%</th></tr></thead><tbody>`;
+    for(const it of d.items){
+      const cls = (it.unrealized||0) > 0 ? 'pos' : (it.unrealized||0) < 0 ? 'neg' : '';
+      html += `<tr>
+        <td><b>${it.sid}</b></td>
+        <td class="num">${it.price.toFixed(1)}</td>
+        <td class="num">${it.shares.toLocaleString()}</td>
+        <td>${it.buy_date || '-'}</td>
+        <td class="num">${it.cur != null ? it.cur.toFixed(1) : '-'}</td>
+        <td class="num ${cls}">${it.unrealized != null ? (it.unrealized>=0?'+':'') + it.unrealized.toLocaleString() : '-'}</td>
+        <td class="num ${cls}">${it.change_pct != null ? (it.change_pct>=0?'+':'') + it.change_pct + '%' : '-'}</td>
+      </tr>`;
+    }
+    const totalCls = d.total_unrealized > 0 ? 'pos' : d.total_unrealized < 0 ? 'neg' : '';
+    const realizedCls = d.total_realized > 0 ? 'pos' : d.total_realized < 0 ? 'neg' : '';
+    html += `</tbody><tfoot>
+      <tr><td colspan="4" class="muted">總成本</td>
+          <td class="num" colspan="3">${d.total_cost.toLocaleString()} 元</td></tr>
+      <tr><td colspan="4" class="muted">市值</td>
+          <td class="num" colspan="3">${d.total_value.toLocaleString()} 元</td></tr>
+      <tr><td colspan="4" class="muted">未實現損益</td>
+          <td class="num ${totalCls}" colspan="3">${(d.total_unrealized>=0?'+':'') + d.total_unrealized.toLocaleString()} 元</td></tr>
+      <tr><td colspan="4" class="muted">已實現損益</td>
+          <td class="num ${realizedCls}" colspan="3">${(d.total_realized>=0?'+':'') + d.total_realized.toLocaleString()} 元</td></tr>
+    </tfoot></table>`;
+    wrap.innerHTML = html;
+  } catch(e){
+    wrap.innerHTML = '<p class="neg">載入失敗：' + e.message + '</p>';
+  }
+}
+async function doBuy(){
+  const sid = document.getElementById('buySid').value.trim();
+  const price = parseFloat(document.getElementById('buyPrice').value);
+  const shares = parseInt(document.getElementById('buyShares').value);
+  if(!sid || !price || !shares){ show('buyOut', '請填齊代號、價格、股數', 'error'); return; }
+  try {
+    const j = await api('/api/buy', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({sid, price, shares}),
+    });
+    show('buyOut', j, j.ok ? 'success' : 'error');
+    if(j.ok) loadHoldings();
+  } catch(e){
+    show('buyOut', '失敗：' + e.message, 'error');
+  }
+}
+async function doSell(){
+  const sid = document.getElementById('sellSid').value.trim();
+  const price = parseFloat(document.getElementById('sellPrice').value);
+  const shares = parseInt(document.getElementById('sellShares').value);
+  if(!sid || !price || !shares){ show('sellOut', '請填齊代號、價格、股數', 'error'); return; }
+  if(!confirm(`確認賣出 ${sid} ${shares} 股 @ ${price}？`)) return;
+  try {
+    const j = await api('/api/sell', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({sid, price, shares}),
+    });
+    show('sellOut', j, j.ok ? 'success' : 'error');
+    if(j.ok) loadHoldings();
+  } catch(e){
+    show('sellOut', '失敗：' + e.message, 'error');
+  }
+}
+async function addChallenge(){
+  const sid = document.getElementById('chSid').value.trim();
+  if(!sid){ show('chOut', '請填代號', 'error'); return; }
+  try {
+    const j = await api('/api/challenge', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({sid}),
+    });
+    show('chOut', j, j.ok ? 'success' : 'error');
+    loadChallenges();
+  } catch(e){
+    show('chOut', '失敗：' + e.message, 'error');
+  }
+}
+async function loadChallenges(){
+  const wrap = document.getElementById('chTable');
+  wrap.innerHTML = '<p class="muted">載入中...</p>';
+  try {
+    const j = await api('/api/challenges');
+    const items = (j.data || {}).items || [];
+    if(!items.length){ wrap.innerHTML = '<p class="muted">本週尚無挑戰</p>'; return; }
+    let html = `<p class="muted" style="margin-top:8px">週次：${j.data.week_key}</p>
+      <table><thead><tr><th>代號</th><th class="num">起始價</th>
+      <th class="num">現價</th><th class="num">漲跌%</th><th>截止日</th></tr></thead><tbody>`;
+    for(const it of items){
+      const cls = (it.change_pct||0) > 0 ? 'pos' : (it.change_pct||0) < 0 ? 'neg' : '';
+      html += `<tr>
+        <td><b>${it.sid}</b></td>
+        <td class="num">${it.start_price.toFixed(1)}</td>
+        <td class="num">${it.cur_price != null ? it.cur_price.toFixed(1) : '-'}</td>
+        <td class="num ${cls}">${it.change_pct != null ? (it.change_pct>=0?'+':'') + it.change_pct + '%' : '-'}</td>
+        <td>${it.end_date || '-'}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  } catch(e){
+    wrap.innerHTML = '<p class="neg">載入失敗：' + e.message + '</p>';
+  }
+}
+
+// 啟動
+const saved = localStorage.getItem(API_KEY);
+if(saved) document.getElementById('apiUrl').value = saved;
+loadLastRun();
+</script>
+</body>
+</html>
