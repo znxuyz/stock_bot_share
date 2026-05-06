@@ -195,7 +195,7 @@ def _classify(entry, ss, s, a, chase, watch):
 def run_analysis(attempt=0, run_mode=None):
     """
     盤後分析主流程（純網頁版）。
-    回傳狀態字串：'success' / 'holiday' / 'fail'。
+    回傳狀態字串：'success' / 'holiday' / 'fail' / 'rate_limited'。
     完成後資料寫入 DB + 推 dashboard JSON 到 GitHub Pages。
     """
     if not config.DATABASE_URL:
@@ -292,6 +292,8 @@ def run_analysis(attempt=0, run_mode=None):
         ss_list, s_list, a_list = [], [], []
         chase_list, watch_list = [], []
         consec_fails = 0
+        backoff_count = 0   # 累積退避次數；超過 MAX_BACKOFFS 視為 TWSE 持續限速，直接中止
+        rate_limited = False
 
         for idx_c, entry in enumerate(candidates):
             sid = entry['sid']
@@ -305,12 +307,21 @@ def run_analysis(attempt=0, run_mode=None):
                     logger.info('  [%d/%d] %s 歷史資料不足 ✗ %.1fs (連續失敗 %d)',
                                 idx_c + 1, len(candidates), sid, elapsed, consec_fails)
                     if consec_fails >= config.RATE_LIMIT_THRESHOLD:
-                        logger.warning('  [⏸ 限速退避] 連續 %d 檔抓不到，暫停 %ds',
-                                       consec_fails, config.RATE_LIMIT_BACKOFF_SEC)
+                        backoff_count += 1
+                        if backoff_count > config.MAX_BACKOFFS:
+                            logger.error('  [⛔ 限速中止] 已累積 %d 次退避仍持續失敗，'
+                                         'TWSE 對本 IP 限速中。中止本次分析，請隔 30~60 分鐘再試。',
+                                         backoff_count)
+                            rate_limited = True
+                            break
+                        logger.warning('  [⏸ 限速退避] 連續 %d 檔抓不到，暫停 %ds（第 %d/%d 次退避）',
+                                       consec_fails, config.RATE_LIMIT_BACKOFF_SEC,
+                                       backoff_count, config.MAX_BACKOFFS)
                         time.sleep(config.RATE_LIMIT_BACKOFF_SEC)
                         consec_fails = 0
                     continue
                 consec_fails = 0
+                backoff_count = 0   # 抓到資料 → 重置退避計數
 
                 vol_ratio = calc_volume_ratio(df_hist, target_date)
                 if vol_ratio < config.VOLUME_RATIO_MIN:
@@ -339,6 +350,10 @@ def run_analysis(attempt=0, run_mode=None):
                             entry['change'], vol_ratio, ema_mode, entry['chase_mode'], elapsed)
             except Exception as e:
                 logger.warning('  [%d/%d] %s 錯誤：%s', idx_c + 1, len(candidates), sid, e)
+
+        if rate_limited and not (ss_list or s_list or a_list or chase_list or watch_list):
+            logger.error('[完成] TWSE 限速導致無有效資料，請隔 30~60 分鐘再試。')
+            return 'rate_limited'
 
         for lst in (ss_list, s_list, a_list, chase_list, watch_list):
             lst.sort(key=lambda e: e.get('score', 0), reverse=True)
