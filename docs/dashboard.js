@@ -79,6 +79,40 @@ function getApiUrl(){
 
 function reloadAll(){ loadAll(); }
 
+// ── 立即觸發盤後篩選（呼叫後端 /api/run）──
+async function triggerScreening(){
+  const apiUrl = getApiUrl();
+  if(!apiUrl){
+    alert('尚未設定後端 API 網址。\n\n請到「🛠️ 操作」面板填入 Railway 的服務位址後再試一次。');
+    return;
+  }
+  if(!confirm('確定要立即觸發盤後篩選？\n\n• 約需 3-5 分鐘\n• 會抓 TWSE 法人 / 量價資料、跑評分、寫入 Dashboard\n• 期間無法重複觸發\n\n一般情況不需要按這個，下午 5 點會自動跑。')) return;
+  try {
+    const r = await fetch(apiUrl + '/api/run', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({mode:'auto'}),
+    });
+    let j = {};
+    try { j = await r.json(); } catch(_){}
+    if(r.status === 401){
+      alert('需要密碼才能觸發。請重新整理頁面，瀏覽器會跳出認證對話框；或到「🛠️ 操作」面板用同一台機器先做一次 POST 解鎖。');
+      return;
+    }
+    if(r.status === 409){
+      alert('⏳ 上一次分析還在執行中（約 3-5 分鐘），稍後再試。');
+      return;
+    }
+    if(j.ok){
+      alert('✅ 已開始執行（' + (j.message || '') + '）\n\n約 3-5 分鐘後按「🔄 重新整理」就會看到結果。');
+    } else {
+      alert('❌ 觸發失敗：' + (j.error || ('HTTP ' + r.status)));
+    }
+  } catch(e){
+    alert('❌ 連線失敗：' + e.message + '\n\n檢查 Railway 服務是否在線、API 網址是否正確。');
+  }
+}
+
 document.querySelectorAll('.tab').forEach(btn=>{
   btn.addEventListener('click',()=>{
     document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
