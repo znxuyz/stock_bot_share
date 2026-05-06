@@ -100,9 +100,10 @@ def build_payloads():
     if api_url and not api_url.startswith('http'):
         api_url = 'https://' + api_url
     payloads['config.json'] = {
-        'updated_at': updated_at,
-        'api_url':    api_url,
-        'schema':     config.SCHEMA_VERSION,
+        'updated_at':  updated_at,
+        'api_url':     api_url,
+        'github_repo': config.GITHUB_REPO,
+        'schema':      config.SCHEMA_VERSION,
     }
 
     if os.path.exists(config.TOP_FLOW_CACHE):

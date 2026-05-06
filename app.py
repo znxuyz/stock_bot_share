@@ -11,7 +11,7 @@
   PORT             HTTP 監聽 port（Railway 自動注入；預設 8080）
   DATABASE_URL     PostgreSQL 連線字串
   GITHUB_TOKEN     Fine-grained PAT（contents read+write，給 dashboard 用）
-  GITHUB_REPO      預設 znxuyz/stock_bot_share
+  GITHUB_REPO      你的 GitHub repo，例如 your-name/your-repo（必填）
   GITHUB_BRANCH    預設 main
   BOT_PUBLIC_URL   給 dashboard 個股查詢用的本服務外部網址
   WEB_PASSWORD     寫入操作密碼（留空即不啟用驗證）

@@ -27,7 +27,7 @@ RUN_TIMEOUT_SEC = 1800
 
 # ─────────── GitHub Pages（Dashboard 部署） ───────────
 GITHUB_TOKEN  = os.environ.get('GITHUB_TOKEN', '')
-GITHUB_REPO   = os.environ.get('GITHUB_REPO', 'znxuyz/stock_bot_share')
+GITHUB_REPO   = os.environ.get('GITHUB_REPO', '')   # 必填，例如 'your-name/your-repo'
 GITHUB_BRANCH = os.environ.get('GITHUB_BRANCH', 'main')
 GITHUB_API    = 'https://api.github.com'
 
