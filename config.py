@@ -11,7 +11,7 @@ PORT = int(os.environ.get('PORT', 8080))
 # 單人版固定 ID（保留 multi-tenant 欄位以沿用 my_stock_bot 的 schema）
 GUILD_ID = os.environ.get('GUILD_ID', 'default')
 USER_ID  = os.environ.get('USER_ID',  'default')
-USER_NAME = os.environ.get('USER_NAME', '爸爸')
+USER_NAME = os.environ.get('USER_NAME', '使用者')
 
 # 寫入操作的密碼保護（留空 = 不啟用）
 WEB_PASSWORD = os.environ.get('WEB_PASSWORD', '')
