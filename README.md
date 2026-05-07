@@ -1,10 +1,21 @@
 # 川投顧量化系統 ── 純網頁版（單人）
 
+> # 🚀 第一次安裝看這裡 → **[`SETUP_GUIDE.md`](SETUP_GUIDE.md)**
+>
+> 從 fork、Railway 部署、GitHub Pages、Token 申請到日常使用，**完整逐步圖文教學在 `SETUP_GUIDE.md`**，遇到任何問題先查這份。
+
+| 你想做什麼 | 看這裡 |
+|---|---|
+| 🆕 第一次部署 / 不知道從哪開始 | [`SETUP_GUIDE.md` § A 部署](SETUP_GUIDE.md#a-部署一次性) |
+| 📱 已經部署好，想學日常怎麼用 | [`SETUP_GUIDE.md` § B 日常使用](SETUP_GUIDE.md#b-日常使用) |
+| 🔧 部署遇到問題（Railway crash / 403 / 空白） | [`SETUP_GUIDE.md` § A-7 部署常見問題](SETUP_GUIDE.md#a-7-部署常見問題) |
+| 📂 不知道某個資料夾 / 檔案是做什麼的 | 本檔案下方 [模組結構](#模組結構) |
+
+---
+
 `my_stock_bot` 拿掉 Discord 推播後的純網頁版本。每個交易日盤後 17:00 自動抓
 TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進 GitHub Pages dashboard；
 買賣紀錄、選股挑戰、手動觸發分析等操作改在 `docs/admin.html` 上完成。
-
-> 📖 **第一次用？** 先看 [`SETUP_GUIDE.md`](SETUP_GUIDE.md) ── 從 fork 到部署完成的逐步指南，含費用提醒、Token 申請、常見錯誤排除。
 
 > **適用對象**：任何 GitHub 用戶都可以 fork 此 repo 自行部署，**不需修改任何 hardcoded 字串**。
 
@@ -82,42 +93,73 @@ TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進 Gi
 
 ## 模組結構
 
+> 💡 **每個資料夾都有自己的 README.md**，點進去可看更詳細的檔案說明。
+
+### 頂層檔案
+
+| 檔案 | 角色 | 說明 |
+|---|---|---|
+| `SETUP_GUIDE.md` | 📖 **必讀** | 完整安裝與日常使用教學 |
+| `README.md` | 📖 | 本檔案，總覽 + 模組地圖 |
+| `requirements.txt` | ⚙️ | Python 依賴（`pip install -r` 用） |
+| `app.py` | 🚀 進入點 | HTTP server + 啟動排程器 |
+| `config.py` | ⚙️ 設定 | 環境變數讀取、策略門檻常數 |
+| `analysis.py` | 🧠 主流程 | 盤後 4 層篩選漏斗（取代 Discord 版） |
+| `stock_analyzer.py` | 🔍 個股 | `/api/stock` 用的單檔分析 |
+| `web_export.py` | 📤 推送 | 把 DB 結果寫成 JSON 並 push 到 `docs/data/` |
+| `matching.py` | 📊 撮合 | T+1 開盤撮合、進場價判定 |
+| `scoring.py` | 🧮 評分 | 8 項評分 + 加減項，總分 105 |
+| `chase.py` | 🚀 追漲 | 連 ≥ 3 日漲停的特殊路徑 |
+| `entry_zone.py` | 🎯 進場區 | 隔日合理進場區間計算 |
+| `topflow.py` | 💰 籌碼 | 外資 / 投信 Top 買賣超 |
+| `indicators.py` | 📈 指標 | EMA / 量比 / RSI / MACD 等 |
+| `advanced_indicators.py` | 📈 進階指標 | 乖離、KD、布林、BBI 等 |
+| `twse_http.py` | 🌐 TWSE | HTTP 抓取 + 限速退避 |
+| `twse_kbar.py` | 🌐 TWSE | K 棒歷史 |
+| `twse_t86.py` | 🌐 TWSE | 三大法人買賣超（T86） |
+| `twse_market.py` | 🌐 TWSE | 大盤資訊（MI_INDEX） |
+| `twse_margin.py` | 🌐 TWSE | 融資融券 |
+| `time_utils.py` | 🕐 工具 | 台北時區、交易日判斷 |
+| `format_utils.py` | 🛠️ 工具 | 格式化（百分比、千分位…） |
+| `logging_setup.py` | 📝 工具 | 統一 logger 設定 |
+
+### 資料夾
+
+| 資料夾 | 用途 | 詳細 |
+|---|---|---|
+| [`db/`](db/) | 🗄️ **資料庫層**（PostgreSQL） | 連線、schema、各種讀寫（持倉 / 篩選 / 結算 / 統計 / 挑戰） |
+| [`web/`](web/) | 🌐 **HTTP 應用層**（取代原 Discord bot） | 路由、排程、auth、買賣 / 挑戰 / 統計 view |
+| [`docs/`](docs/) | 📊 **GitHub Pages 前端** | Dashboard `index.html` + 操作面板 `admin.html` + JSON 資料 |
+| [`tests/`](tests/) | 🧪 **單元測試** | pytest 純邏輯測試（不打 TWSE / DB） |
+| `.github/` | 🤖 GitHub 設定 | workflows（CI） |
+
+### 一張圖看資料怎麼流動
+
 ```
-.
-├── SETUP_GUIDE.md              # 安裝與使用說明（部署 + 日常使用）
-├── app.py                      # 進入點（HTTP server + scheduler）
-├── config.py                   # 環境變數 / 策略常數
-├── analysis.py                 # 盤後篩選主流程（無 Discord）
-├── stock_analyzer.py           # 個股分析（給 /api/stock 用）
-├── web_export.py               # Dashboard JSON + GitHub API push
-├── matching.py                 # T+1 撮合
-├── scoring.py / chase.py / entry_zone.py / topflow.py
-├── indicators.py / advanced_indicators.py
-├── twse_*.py                   # TWSE 抓取（HTTP / K 棒 / T86 / 大盤 / 融資）
-├── time_utils.py / format_utils.py / logging_setup.py
-│
-├── db/                         # PostgreSQL（拿掉 guild_settings）
-│   ├── conn.py / schema.py
-│   ├── runs.py / screens.py / settle.py / stats.py
-│   └── holdings.py / challenges.py
-│
-├── web/                        # 取代原 discord_bot/
-│   ├── handlers.py             # HTTP 路由（取代 InteractionHandler）
-│   ├── scheduler.py            # 17:00 / 週五排程（無 Discord 通知）
-│   ├── settle.py               # 週五結算（無 Discord 推播）
-│   ├── portfolio.py            # 持倉 / 買 / 賣 / 排行榜
-│   ├── challenge.py            # 選股挑戰
-│   ├── stats_view.py           # 統計 / 報表
-│   ├── auth.py                 # WEB_PASSWORD basic auth
-│   └── state.py                # LAST_RUN（執行緒安全）
-│
-├── docs/                       # GitHub Pages
-│   ├── index.html              # Dashboard 主頁（HTML + CSS）
-│   ├── dashboard.js            # Dashboard JS 邏輯（4 分頁 + FAB）
-│   ├── admin.html              # 操作面板（單人版專用）
-│   └── data/*.json
-│
-└── tests/                      # pytest（純邏輯，不打 TWSE / DB）
+                17:00 排程
+                    │
+                    ▼
+   ┌────────────────────────────────────┐
+   │  web/scheduler.py 觸發              │
+   │      └─→ analysis.py 跑 4 層篩選     │
+   │              ├─→ twse_*.py 抓資料    │
+   │              ├─→ indicators.py 算   │
+   │              ├─→ scoring.py 評分    │
+   │              └─→ db/screens.py 寫入 │
+   └─────────────┬──────────────────────┘
+                 │
+                 ▼
+   ┌────────────────────────────────────┐
+   │  web_export.py                      │
+   │      ├─→ docs/data/*.json（本機）    │
+   │      └─→ GitHub API push（雲端）     │
+   └─────────────┬──────────────────────┘
+                 │
+                 ▼  GitHub Pages 自動 redeploy
+   ┌────────────────────────────────────┐
+   │  docs/index.html  ←  使用者瀏覽器     │
+   │  docs/admin.html  ←  使用者操作       │
+   └────────────────────────────────────┘
 ```
 
 ---
