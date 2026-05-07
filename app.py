@@ -15,7 +15,7 @@
   GITHUB_BRANCH    預設 main
   BOT_PUBLIC_URL   給 dashboard 個股查詢用的本服務外部網址
   WEB_PASSWORD     寫入操作密碼（留空即不啟用驗證）
-  USER_NAME        持倉顯示用名稱（預設「爸爸」）
+  USER_NAME        持倉顯示用名稱（預設「使用者」）
 """
 import logging
 import threading
