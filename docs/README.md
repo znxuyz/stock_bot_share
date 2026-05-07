@@ -8,7 +8,9 @@
 2. **Source**：選 `Deploy from a branch`
 3. **Branch**：選 `main`，資料夾選 `/docs`
 4. 按 **Save**，等 1~2 分鐘後 Pages 就會發佈到
-   `https://znxuyz.github.io/stock_bot_share/`
+   `https://<USERNAME>.github.io/<REPO>/`
+
+> `<USERNAME>` 是你的 GitHub 帳號、`<REPO>` 是你 fork 後的 repo 名稱。
 
 ## 自動更新
 
@@ -25,7 +27,7 @@
 | 變數 | 用途 |
 |------|------|
 | `GITHUB_TOKEN` | Personal Access Token（fine-grained，需 `Contents: Read & Write`） |
-| `GITHUB_REPO`  | 預設 `znxuyz/stock_bot_share` |
+| `GITHUB_REPO`  | 必填，格式 `<USERNAME>/<REPO>`（你 fork 後的 repo） |
 | `GITHUB_BRANCH`| 預設 `main` |
 
 若未設定 `GITHUB_TOKEN`，服務仍會在本機寫檔，但不會推到 GitHub。
