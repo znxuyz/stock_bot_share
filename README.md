@@ -1,19 +1,21 @@
 # 川投顧量化系統 ── 純網頁版（單人）
 
 `my_stock_bot` 拿掉 Discord 推播後的純網頁版本。每個交易日盤後 17:00 自動抓
-TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進
-[Web Dashboard](https://znxuyz.github.io/stock_bot_share/)；
-買賣紀錄、選股挑戰、手動觸發分析等操作改在
-[`docs/admin.html`](docs/admin.html) 上完成。
+TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進 GitHub Pages dashboard；
+買賣紀錄、選股挑戰、手動觸發分析等操作改在 `docs/admin.html` 上完成。
 
-> 📖 **第一次用？** 先看 [`SETUP_GUIDE.md`](SETUP_GUIDE.md)，裡面有部署一次性步驟（給技術人員）+ 日常使用說明（給爸爸）。
+> 📖 **第一次用？** 先看 [`SETUP_GUIDE.md`](SETUP_GUIDE.md) ── 從 fork 到部署完成的逐步指南，含費用提醒、Token 申請、常見錯誤排除。
+
+> **適用對象**：任何 GitHub 用戶都可以 fork 此 repo 自行部署，**不需修改任何 hardcoded 字串**。
 
 | 服務 | 連結 |
 |------|------|
-| 後端 HTTP（Railway） | _部署後填入_ |
-| Dashboard | https://znxuyz.github.io/stock_bot_share/ |
-| 操作面板 | https://znxuyz.github.io/stock_bot_share/admin.html |
-| 個股 API | `https://<railway-url>/api/stock?sid=2330` |
+| 後端 HTTP（Railway） | `https://<your-railway-url>` |
+| Dashboard | `https://<USERNAME>.github.io/<REPO>/` |
+| 操作面板 | `https://<USERNAME>.github.io/<REPO>/admin.html` |
+| 個股 API | `https://<your-railway-url>/api/stock?sid=2330` |
+
+> 上述 `<USERNAME>` 是你的 GitHub 帳號、`<REPO>` 是你 fork 後的 repo 名稱。
 
 策略邏輯與 [`my_stock_bot`](https://github.com/znxuyz/my_stock_bot) 完全相同
 （同一份 `analysis.py / scoring.py / chase.py / entry_zone.py / matching.py / db/...`），
@@ -23,7 +25,7 @@ TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進
 
 ## 與 my_stock_bot 的差異
 
-| | my_stock_bot | stock_bot_share |
+| | my_stock_bot | 本 repo |
 |--|--|--|
 | 觸發 / 操作 | Discord 指令 | 網頁表單（`docs/admin.html`） |
 | 推播 | Discord webhook | 不推播；結果只在 dashboard 顯示 |
@@ -39,22 +41,23 @@ TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進
 
 完整步驟見 [`SETUP_GUIDE.md`](SETUP_GUIDE.md) 的 A 部分。簡略：
 
-1. **新建 Railway 專案** → Connect to `znxuyz/stock_bot_share`
-2. **加 PostgreSQL plugin**（Railway 自動注入 `DATABASE_URL`）
-3. **設定環境變數**：
+1. **Fork 此 repo** 到你自己的 GitHub 帳號（取個你想要的 repo 名稱）
+2. **新建 Railway 專案** → Connect to 你 fork 的 repo
+3. **加 PostgreSQL plugin**（Railway 自動注入 `DATABASE_URL`）
+4. **設定環境變數**：
 
    | 變數 | 必填 | 說明 |
    |------|------|------|
    | `DATABASE_URL`   | ✅（Railway 自動注入） | PostgreSQL |
-   | `GITHUB_TOKEN`   | ✅ | Fine-grained PAT，`Contents: Read & Write` |
-   | `GITHUB_REPO`    | ⚪ | 預設 `znxuyz/stock_bot_share` |
+   | `GITHUB_TOKEN`   | ✅ | Fine-grained PAT，**Contents: Read and write** |
+   | `GITHUB_REPO`    | ✅ | 你 fork 的 repo，格式 `<USERNAME>/<REPO>` |
    | `GITHUB_BRANCH`  | ⚪ | 預設 `main` |
    | `BOT_PUBLIC_URL` | ✅ | 部署後的 Railway 公開 URL（給 dashboard 個股查詢用） |
    | `WEB_PASSWORD`   | ⚪ | admin 寫入操作密碼；留空 = 不驗證 |
-   | `USER_NAME`      | ⚪ | 持倉顯示用名稱，預設「爸爸」 |
+   | `USER_NAME`      | ⚪ | 持倉顯示用名稱 |
    | `LOG_LEVEL`      | ⚪ | `INFO`（預設） |
 
-4. **啟用 GitHub Pages**：repo Settings → Pages → Source = Deploy from branch (`main`, `/docs`)
+5. **啟用 GitHub Pages**：repo Settings → Pages → Source = Deploy from branch (`main`, `/docs`)
 
 部署完成後，dashboard 自動同步 `docs/data/*.json`；admin 頁第一次開啟要在「服務位址」
 欄位填入 Railway URL，按儲存。
@@ -80,8 +83,8 @@ TWSE 法人 / 量價資料、跑同一套 4 層篩選漏斗，把結果寫進
 ## 模組結構
 
 ```
-stock_bot_share/
-├── SETUP_GUIDE.md              # 新手操作說明（部署 + 日常使用）
+.
+├── SETUP_GUIDE.md              # 安裝與使用說明（部署 + 日常使用）
 ├── app.py                      # 進入點（HTTP server + scheduler）
 ├── config.py                   # 環境變數 / 策略常數
 ├── analysis.py                 # 盤後篩選主流程（無 Discord）
@@ -155,8 +158,8 @@ POST 端點若 `WEB_PASSWORD` 有設定，需要 HTTP Basic Auth（任意 user /
 ## 本機開發
 
 ```bash
-git clone https://github.com/znxuyz/stock_bot_share.git
-cd stock_bot_share
+git clone https://github.com/<USERNAME>/<REPO>.git
+cd <REPO>
 pip install -r requirements.txt
 pip install pytest pyflakes
 
