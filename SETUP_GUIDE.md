@@ -35,7 +35,7 @@
 
 完成後你會在 `https://github.com/<USERNAME>/<REPO>` 看到自己的副本。
 
-> 💡 「Fork」就是把別人的 repo 複製一份到你自己帳號下。**之後我（上游）有更新時，你可以一鍵 sync fork 拉過來**。
+> 💡 「Fork」就是把別人的 repo 複製一份到你自己帳號下。**之後上游有更新時，你可以一鍵 sync fork 拉過來**。
 
 ### A-2. 開 Railway 專案 + 加 PostgreSQL
 
@@ -93,7 +93,7 @@
 | `GITHUB_REPO`    | ✅ | `<USERNAME>/<REPO>`（例如 `lucky/stock-bot`） |
 | `BOT_PUBLIC_URL` | ✅ | A-2-3 抄下來的 Railway 網址（含 `https://`） |
 | `WEB_PASSWORD`   | ⚪ | 任意密碼，會用來保護「執行 / 買 / 賣」等寫入操作；留空 = 任何人知道 URL 都能操作（風險：URL 外流即可寫入） |
-| `USER_NAME`      | ⚪ | 持倉顯示用名稱，預設「爸爸」 |
+| `USER_NAME`      | ⚪ | 持倉顯示用名稱，預設「使用者」 |
 
 > 💡 **不需要自己填的**：
 > - `DATABASE_URL`（Railway 自動注入）
